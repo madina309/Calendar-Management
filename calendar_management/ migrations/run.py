@@ -1,8 +1,11 @@
-from app import create_app
+from flask import Flask
 
-# Create the Flask application using the configuration for the desired environment
-app = create_app(config_name="development")  # You can change to "production" or "testing" as needed
-
-if __name__ == "__main__":
-    # Run the Flask app with debug mode enabled for development
-    app.run(host="0.0.0.0", port=5000, debug=True)
+def create_app(config_name):
+    app = Flask(__name__)
+    
+    # Load the configuration based on the config_name
+    app.config.from_object(config_name)
+    
+    # Add any other initialization, like registering blueprints, etc.
+    
+    return app
