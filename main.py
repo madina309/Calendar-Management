@@ -1,96 +1,78 @@
-from flask import Flask, request, jsonify
+
+   
+
+           from flask import Flask, jsonify, request, abort
+from models import db, User, Calendar, Event
 from datetime import datetime
+import os
 
 app = Flask(__name__)
 
-# Calendar Event class (OOP principles)
-class CalendarEvent:
-    def __init__(self, title, description, start_time, end_time):
-        self.title = title
-        self.description = description
-        self.start_time = start_time
-        self.end_time = end_time
+# Configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///calendar.db'  # You can change to another DB like PostgreSQL or MySQL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your_secret_key')  # Use .env for sensitive keys
 
-    def to_dict(self):
-        """Convert the CalendarEvent object to dictionary to return as JSON"""
-        return {
-            'title': self.title,
-            'description': self.description,
-            'start_time': self.start_time.strftime("%Y-%m-%d %H:%M:%S"),
-            'end_time': self.end_time.strftime("%Y-%m-%d %H:%M:%S")
-        }
+db.init_app(app)
 
-# Store events in memory (for simplicity)
-events = [] 
+@app.before_first_request
+def create_tables():
+    db.create_all()
 
-# Endpoint to create a new event
-@app.route('/events', methods=['POST'])
-def create_event():
+# Create a user (For demonstration purposes)
+@app.route('/users', methods=['POST'])
+def create_user():
     data = request.get_json()
+    if 'username' not in data or 'email' not in data:
+        abort(400, description="Username and email are required.")
+    
+    user = User(username=data['username'], email=data['email'])
+    db.session.add(user)
+    db.session.commit()
+    
+    return jsonify({"message": "User created successfully", "user_id": user.id}), 201
 
-    # Validate data
-    if 'title' not in data or 'description' not in data or 'start_time' not in data or 'end_time' not in data:
-        return jsonify({'error': 'Missing required fields'}), 400
-
-    try:
-        start_time = datetime.strptime(data['start_time'], "%Y-%m-%d %H:%M:%S")
-        end_time = datetime.strptime(data['end_time'], "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD HH:MM:SS'}), 400
-
-    new_event = CalendarEvent(data['title'], data['description'], start_time, end_time)
-    events.append(new_event)
-
-    return jsonify(new_event.to_dict()), 201
-
-# Endpoint to get all events
-@app.route('/events', methods=['GET'])
-def get_events():
-    event_list = [event.to_dict() for event in events]
-    return jsonify(event_list), 200
-
-# Endpoint to get an event by its index
-@app.route('/events/<int:event_id>', methods=['GET'])
-def get_event(event_id):
-    if event_id < 0 or event_id >= len(events):
-        return jsonify({'error': 'Event not found'}), 404
-    return jsonify(events[event_id].to_dict()), 200
-
-# Endpoint to update an event
-@app.route('/events/<int:event_id>', methods=['PUT'])
-def update_event(event_id):
-    if event_id < 0 or event_id >= len(events):
-        return jsonify({'error': 'Event not found'}), 404
-
+# Create a calendar for a user
+@app.route('/users/<int:user_id>/calendars', methods=['POST'])
+def create_calendar(user_id):
     data = request.get_json()
-    event = events[event_id]
+    if 'name' not in data:
+        abort(400, description="Calendar name is required.")
+    
+    user = User.query.get_or_404(user_id)
+    calendar = Calendar(name=data['name'], user_id=user.id)
+    db.session.add(calendar)
+    db.session.commit()
 
-    event.title = data.get('title', event.title)
-    event.description = data.get('description', event.description)
+    return jsonify({"message": "Calendar created successfully", "calendar_id": calendar.id}), 201
 
-    if 'start_time' in data:
-        try:
-            event.start_time = datetime.strptime(data['start_time'], "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD HH:MM:SS'}), 400
+# Create an event for a calendar
+@app.route('/calendars/<int:calendar_id>/events', methods=['POST'])
+def create_event(calendar_id):
+    data = request.get_json()
+    if 'title' not in data or 'start_time' not in data or 'end_time' not in data:
+        abort(400, description="Title, start_time, and end_time are required.")
+    
+    calendar = Calendar.query.get_or_404(calendar_id)
+    start_time = datetime.strptime(data['start_time'], "%Y-%m-%d %H:%M:%S")
+    end_time = datetime.strptime(data['end_time'], "%Y-%m-%d %H:%M:%S")
+    
+    event = Event(title=data['title'], description=data.get('description', ''), 
+                  start_time=start_time, end_time=end_time, calendar_id=calendar.id)
+    db.session.add(event)
+    db.session.commit()
 
-    if 'end_time' in data:
-        try:
-            event.end_time = datetime.strptime(data['end_time'], "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD HH:MM:SS'}), 400
+    return jsonify({"message": "Event created successfully", "event_id": event.id}), 201
 
-    return jsonify(event.to_dict()), 200
+# Get all events for a calendar
+@app.route('/calendars/<int:calendar_id>/events', methods=['GET'])
+def get_events(calendar_id):
+    calendar = Calendar.query.get_or_404(calendar_id)
+    events = Event.query.filter_by(calendar_id=calendar.id).all()
+    event_list = [{"id": event.id, "title": event.title, "start_time": event.start_time, "end_time": event.end_time}
+                  for event in events]
 
-# Endpoint to delete an event
-@app.route('/events/<int:event_id>', methods=['DELETE'])
-def delete_event(event_id):
-    if event_id < 0 or event_id >= len(events):
-        return jsonify({'error': 'Event not found'}), 404
+    return jsonify({"events": event_list})
 
-    events.pop(event_id)
-    return jsonify({'message': 'Event deleted successfully'}), 200
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
-
